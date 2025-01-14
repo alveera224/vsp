@@ -4,7 +4,12 @@ import multer from "multer";
 import { v4 as uuidv4 } from "uuid";
 import path from "path";
 import fs from "fs";
-import { exec } from "child_process";
+import ffmpeg from "fluent-ffmpeg";
+import dotenv from "dotenv";
+dotenv.config();
+// Manually set the FFmpeg path
+//ffmpeg.setFfmpegPath("C:\\Users\\abhishekd\\Downloads\\ffmpeg\\bin\\ffmpeg"); // Update this with your FFmpeg binary path
+ffmpeg.setFfmpegPath(process.env.FFMPEG_PATH);
 
 const app = express();
 
@@ -56,30 +61,37 @@ app.post("/upload", upload.single("file"), (req, res) => {
   // Ensure the output directory exists
   ensureDirectoryExistence(outputPath);
 
-  // FFmpeg command for HLS conversion
-  const ffmpegCommand = `ffmpeg -i "${videoPath}" -codec:v libx264 -codec:a aac -hls_time 10 -hls_playlist_type vod -hls_segment_filename "${outputPath}/segment%03d.ts" -start_number 0 "${hlsPath}"`;
-
-  exec(ffmpegCommand, (error, stdout, stderr) => {
-    if (error) {
-      console.error(`FFmpeg error: ${error.message}`);
+  // Use fluent-ffmpeg for HLS conversion
+  ffmpeg(videoPath)
+    .outputOptions([
+      "-codec:v libx264",
+      "-codec:a aac",
+      "-hls_time 10",
+      "-hls_playlist_type vod",
+      `-hls_segment_filename ${path.join(outputPath, "segment%03d.ts")}`,
+    ])
+    .output(hlsPath)
+    .on("start", (commandLine) => {
+      console.log(`FFmpeg process started: ${commandLine}`);
+    })
+    .on("error", (err) => {
+      console.error(`FFmpeg error: ${err.message}`);
       return res.status(500).json({ error: "Video processing failed" });
-    }
+    })
+    .on("end", () => {
+      console.log("HLS conversion completed");
+      const videoUrl = `http://localhost:3000/uploads/courses/${lessonId}/index.m3u8`;
 
-    console.log(`FFmpeg stdout: ${stdout}`);
-    console.error(`FFmpeg stderr: ${stderr}`);
-
-    const videoUrl = `http://localhost:8000/uploads/courses/${lessonId}/index.m3u8`;
-
-    res.json({
-      message: "Video successfully converted to HLS format",
-      videoUrl: videoUrl,
-      lessonId: lessonId,
-    });
-  });
+      res.json({
+        message: "Video successfully converted to HLS format",
+        videoUrl: videoUrl,
+        lessonId: lessonId,
+      });
+    })
+    .run();
 });
 
 // Start the server
 app.listen(3000, () => {
   console.log("App is listening on port 3000...");
-
-}); 
+});

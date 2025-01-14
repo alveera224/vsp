@@ -1,87 +1,85 @@
-import express from "express"
-import cors from "cors"
-import multer from "multer"
-import { v4 as uuidv4 } from "uuid"
-import path from "path"
-import fs from "fs"
-import {exec} from "child_process" // watch out
-import { stderr, stdout } from "process"
+import express from "express";
+import cors from "cors";
+import multer from "multer";
+import { v4 as uuidv4 } from "uuid";
+import path from "path";
+import fs from "fs";
+import { exec } from "child_process";
 
-const app = express()
+const app = express();
 
-//multer middleware
+// Ensure upload directories exist
+const ensureDirectoryExistence = (directoryPath) => {
+  if (!fs.existsSync(directoryPath)) {
+    fs.mkdirSync(directoryPath, { recursive: true });
+  }
+};
 
+// Multer middleware configuration
 const storage = multer.diskStorage({
-  destination: function(req, file, cb){
-    cb(null, "./uploads")
+  destination: (req, file, cb) => {
+    const uploadPath = "./uploads";
+    ensureDirectoryExistence(uploadPath);
+    cb(null, uploadPath);
   },
-  filename: function(req, file, cb){
-    cb(null, file.fieldname + "-" + uuidv4() + path.extname(file.originalname))
-  }
-})
+  filename: (req, file, cb) => {
+    const uniqueFilename = `${file.fieldname}-${uuidv4()}${path.extname(file.originalname)}`;
+    cb(null, uniqueFilename);
+  },
+});
 
-// multer configuration
-const upload = multer({storage: storage})
+const upload = multer({ storage: storage });
 
+// Middleware setup
+app.use(cors({ origin: ["http://localhost:3000", "http://localhost:5173"], credentials: true }));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use("/uploads", express.static("uploads"));
 
-app.use(
-  cors({
-    origin: ["http://localhost:3000", "http://localhost:5173"],
-    credentials: true
-  })
-)
+// Routes
+app.get("/", (req, res) => {
+  res.json({ message: "Welcome to the Video Upload Service" });
+});
 
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*") // watch it
-  res.header(
-    "Access-Control-Allow-Headers",
-    "Origin, X-Requested-With, Content-Type, Accept"
-  );
-  next()
-})
-
-app.use(express.json())
-app.use(express.urlencoded({extended: true}))
-app.use("/uploads", express.static("uploads"))
-
-app.get('/', function(req, res){
-  res.json({message: "Hello chai aur code"})
-})
-
-app.post("/upload", upload.single('file'), function(req, res){
-  const lessonId = uuidv4()
-  const videoPath = req.file.path
-  const outputPath = `./uploads/courses/${lessonId}`
-  const hlsPath = `${outputPath}/index.m3u8`
-  console.log("hlsPath", hlsPath)
-
-  if (!fs.existsSync(outputPath)) {
-    fs.mkdirSync(outputPath, {recursive: true})
+app.post("/upload", upload.single("file"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: "No file uploaded" });
   }
 
-  // ffmpeg
-  const ffmpegCommand = `ffmpeg -i ${videoPath} -codec:v libx264 -codec:a aac -hls_time 10 -hls_playlist_type vod -hls_segment_filename "${outputPath}/segment%03d.ts" -start_number 0 ${hlsPath}
+  const lessonId = uuidv4();
+  const videoPath = req.file.path; // Path to the uploaded video
+  const outputPath = `./uploads/courses/${lessonId}`;
+  const hlsPath = `${outputPath}/index.m3u8`;
 
-`;
+  console.log("Uploaded file path:", videoPath);
 
-  // no queue because of POC, not to be used in production
+  // Ensure the output directory exists
+  ensureDirectoryExistence(outputPath);
+
+  // FFmpeg command for HLS conversion
+  const ffmpegCommand = `ffmpeg -i "${videoPath}" -codec:v libx264 -codec:a aac -hls_time 10 -hls_playlist_type vod -hls_segment_filename "${outputPath}/segment%03d.ts" -start_number 0 "${hlsPath}"`;
+
   exec(ffmpegCommand, (error, stdout, stderr) => {
     if (error) {
-      console.log(`exec error: ${error}`)
+      console.error(`FFmpeg error: ${error.message}`);
+      return res.status(500).json({ error: "Video processing failed" });
     }
-    console.log(`stdout: ${stdout}`)
-    console.log(`stderr: ${stderr}`)
+
+    console.log(`FFmpeg stdout: ${stdout}`);
+    console.error(`FFmpeg stderr: ${stderr}`);
+
     const videoUrl = `http://localhost:8000/uploads/courses/${lessonId}/index.m3u8`;
 
     res.json({
-      message: "Video converted to HLS format",
+      message: "Video successfully converted to HLS format",
       videoUrl: videoUrl,
-      lessonId: lessonId
-    })
-  })
+      lessonId: lessonId,
+    });
+  });
+});
 
-})
+// Start the server
+app.listen(3000, () => {
+  console.log("App is listening on port 3000...");
 
-app.listen(8000, function(){
-  console.log("App is listening at port 8000...")
-})
+}); 

@@ -45,8 +45,9 @@ npm start
 Ensure FFmpeg is Installed
 
 Download and install FFmpeg from FFmpeg.org
-📸 Screenshots
-(Add screenshots of your platform here)
+
+
+
 
 📜 License
 This project is licensed under the MIT License - see the LICENSE file for details.
